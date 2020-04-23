@@ -1,3 +1,6 @@
 [submodule "hyperdbg/libs/zydis"]
 	path = hyperdbg/libs/zydis
 	url = https://github.com/zyantific/zydis
+[submodule "hyperdbg/libs/pdbex"]
+	path = hyperdbg/libs/pdbex
+	url = https://github.com/wbenny/pdbex
