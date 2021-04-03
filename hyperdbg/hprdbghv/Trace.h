@@ -9,10 +9,8 @@
  * @copyright This project is released under the GNU Public License v3.
  * 
  */
+
 #pragma once
-#include <ntddk.h>
-#include <wdf.h>
-#include <wdm.h>
 
 //////////////////////////////////////////////////
 //					Constants					//

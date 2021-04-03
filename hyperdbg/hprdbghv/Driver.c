@@ -11,16 +11,7 @@
  * @copyright This project is released under the GNU Public License v3.
  * 
  */
-#include <ntddk.h>
-#include <wdf.h>
-#include "Common.h"
-#include "HypervisorRoutines.h"
-#include "GlobalVariables.h"
-#include "Logging.h"
-#include "ExtensionCommands.h"
-#include "Hooks.h"
-#include "Debugger.h"
-#include "Trace.h"
+#include "pch.h"
 #include "Driver.tmh"
 
 /**
@@ -94,7 +85,7 @@ DriverEntry(
     //
     RtlZeroMemory(g_GuestState, sizeof(VIRTUAL_MACHINE_STATE) * ProcessorCount);
 
-    LogInfo("Hyperdbg is Loaded :)");
+    LogDebugInfo("Hyperdbg is Loaded :)");
 
     Ntstatus = IoCreateDevice(DriverObject,
                               0,
@@ -109,7 +100,7 @@ DriverEntry(
         for (Index = 0; Index < IRP_MJ_MAXIMUM_FUNCTION; Index++)
             DriverObject->MajorFunction[Index] = DrvUnsupported;
 
-        LogInfo("Setting device major functions");
+        LogDebugInfo("Setting device major functions");
         DriverObject->MajorFunction[IRP_MJ_CLOSE]          = DrvClose;
         DriverObject->MajorFunction[IRP_MJ_CREATE]         = DrvCreate;
         DriverObject->MajorFunction[IRP_MJ_READ]           = DrvRead;
@@ -154,6 +145,11 @@ DrvUnload(PDRIVER_OBJECT DriverObject)
     DbgPrint("Uinitializing logs\n");
     LogUnInitialize();
 #endif
+
+    //
+    // Free g_Events
+    //
+    ExFreePoolWithTag(g_Events, POOLTAG);
 
     //
     // Free g_GuestState
@@ -207,12 +203,11 @@ DrvCreate(PDEVICE_OBJECT DeviceObject, PIRP Irp)
         //
         // A driver got the handle before
         //
-        Irp->IoStatus.Status      = STATUS_UNSUCCESSFUL;
+        Irp->IoStatus.Status      = STATUS_SUCCESS;
         Irp->IoStatus.Information = 0;
         IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
-        return STATUS_UNSUCCESSFUL;
-
+        return STATUS_SUCCESS;
     }
 
     //
@@ -220,7 +215,7 @@ DrvCreate(PDEVICE_OBJECT DeviceObject, PIRP Irp)
     //
     g_AllowIOCTLFromUsermode = TRUE;
 
-    LogInfo("Hyperdbg's hypervisor Started...");
+    LogDebugInfo("Hyperdbg's hypervisor Started...");
     //
     // We have to zero the g_GuestState again as we want to support multiple initialization by CreateFile
     //
@@ -231,9 +226,22 @@ DrvCreate(PDEVICE_OBJECT DeviceObject, PIRP Irp)
     //
     RtlZeroMemory(g_GuestState, sizeof(VIRTUAL_MACHINE_STATE) * ProcessorCount);
 
+    //
+    // Initialize memory mapper
+    //
+    MemoryMapperInitialize();
+
+    //
+    // Check if processor supports TSX (RTM)
+    //
+    g_RtmSupport = CheckCpuSupportRtm();
+
+    //
+    // Initialize Vmx
+    //
     if (HvVmxInitialize())
     {
-        LogInfo("Hyperdbg's hypervisor loaded successfully :)");
+        LogDebugInfo("Hyperdbg's hypervisor loaded successfully :)");
 
         //
         // Initialize the debugger
@@ -241,7 +249,7 @@ DrvCreate(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 
         if (DebuggerInitialize())
         {
-            LogInfo("Hyperdbg's debugger loaded successfully");
+            LogDebugInfo("Hyperdbg's debugger loaded successfully");
 
             //
             // Set the variable so no one else can get a handle anymore
@@ -266,7 +274,7 @@ DrvCreate(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 
     //
     // if we didn't return by now, means that there is a problem
-    // 
+    //
 
     Irp->IoStatus.Status      = STATUS_UNSUCCESSFUL;
     Irp->IoStatus.Information = 0;
@@ -323,14 +331,12 @@ DrvWrite(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 NTSTATUS
 DrvClose(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
-
     //
     // If the close is called means that all of the IOCTLs
     // are not in a pending state so we can safely allow
     // a new handle creation for future calls to the driver
     //
     g_HandleInUse = FALSE;
-
 
     Irp->IoStatus.Status      = STATUS_SUCCESS;
     Irp->IoStatus.Information = 0;
@@ -349,103 +355,11 @@ DrvClose(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 NTSTATUS
 DrvUnsupported(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
-    LogWarning("This function is not supported :(");
+    DbgPrint("This function is not supported :(");
 
     Irp->IoStatus.Status      = STATUS_SUCCESS;
     Irp->IoStatus.Information = 0;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
     return STATUS_SUCCESS;
-}
-
-/**
- * @brief Driver IOCTL Dispatcher
- * 
- * @param DeviceObject 
- * @param Irp 
- * @return NTSTATUS 
- */
-NTSTATUS
-DrvDispatchIoControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
-{
-    PIO_STACK_LOCATION      IrpStack;
-    PREGISTER_NOTIFY_BUFFER RegisterEvent;
-    NTSTATUS                Status;
-
-    if (g_AllowIOCTLFromUsermode)
-    {
-        //
-        // Here's the best place to see if there is any allocation pending
-        // to be allcated as we're in PASSIVE_LEVEL
-        //
-        PoolManagerCheckAndPerformAllocation();
-
-        IrpStack = IoGetCurrentIrpStackLocation(Irp);
-
-        switch (IrpStack->Parameters.DeviceIoControl.IoControlCode)
-        {
-        case IOCTL_REGISTER_EVENT:
-            //
-            // First validate the parameters.
-            //
-            if (IrpStack->Parameters.DeviceIoControl.InputBufferLength < SIZEOF_REGISTER_EVENT || Irp->AssociatedIrp.SystemBuffer == NULL)
-            {
-                Status = STATUS_INVALID_PARAMETER;
-                LogError("Invalid parameter to IOCTL Dispatcher.");
-                break;
-            }
-
-            RegisterEvent = (PREGISTER_NOTIFY_BUFFER)Irp->AssociatedIrp.SystemBuffer;
-
-            switch (RegisterEvent->Type)
-            {
-            case IRP_BASED:
-                Status = LogRegisterIrpBasedNotification(DeviceObject, Irp);
-                break;
-            case EVENT_BASED:
-                Status = LogRegisterEventBasedNotification(DeviceObject, Irp);
-                break;
-            default:
-                LogError("Unknow notification type from user-mode");
-                Status = STATUS_INVALID_PARAMETER;
-                break;
-            }
-            break;
-        case IOCTL_RETURN_IRP_PENDING_PACKETS_AND_DISALLOW_IOCTL:
-            //
-            // Dis-allow new IOCTL
-            //
-            g_AllowIOCTLFromUsermode = FALSE;
-
-            //
-            // Send an immediate message, and we're no longer get new IRP
-            //
-            LogInfoImmediate("An immediate message recieved, we no longer recieve IRPs from user-mode ");
-            Status = STATUS_SUCCESS;
-            break;
-        case IOCTL_TERMINATE_VMX:
-            HvTerminateVmx();
-            Status = STATUS_SUCCESS;
-            break;
-        default:
-            LogError("Unknow IOCTL");
-            Status = STATUS_NOT_IMPLEMENTED;
-            break;
-        }
-    }
-    else
-    { //
-        // We're no longer serve IOCTL
-        //
-        Status = STATUS_SUCCESS;
-    }
-
-    if (Status != STATUS_PENDING)
-    {
-        Irp->IoStatus.Status      = Status;
-        Irp->IoStatus.Information = 0;
-        IoCompleteRequest(Irp, IO_NO_INCREMENT);
-    }
-
-    return Status;
 }

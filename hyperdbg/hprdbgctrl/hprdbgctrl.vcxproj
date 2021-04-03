@@ -50,42 +50,47 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <TargetName>HPRDBGCTRL</TargetName>
     <LinkIncremental>true</LinkIncremental>
-    <OutDir>$(SolutionDir)\Build\Debug\</OutDir>
+    <OutDir>$(SolutionDir)\build\Debug\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <TargetName>HPRDBGCTRL</TargetName>
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>$(SolutionDir)\Build\Release\</OutDir>
+    <OutDir>$(SolutionDir)\build\Release\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;HPRDBGCTRL_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ZYCORE_STATIC_DEFINE;ZYDIS_STATIC_DEFINE;WINVER=0x0502;_WIN32_WINNT=0x0502;NTDDI_VERSION=0x05020000;WIN32;_WINDOWS;NDEBUG;_CRT_SECURE_NO_WARNINGS;HPRDBGCTRL_EXPORTS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(SolutionDir)\Shared Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(SolutionDir)\dependencies\zydis\dependencies\zycore\include;$(SolutionDir)\include;$(SolutionDir)\dependencies\zydis\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <CompileAs>CompileAsCpp</CompileAs>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>$(SolutionDir)libraries\zydis\Zycore.lib;$(SolutionDir)libraries\zydis\Zydis.lib;$(SolutionDir)Build\Debug\script-engine.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <FunctionLevelLinking>
+      </FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;HPRDBGCTRL_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ZYCORE_STATIC_DEFINE;ZYDIS_STATIC_DEFINE;WINVER=0x0502;_WIN32_WINNT=0x0502;NTDDI_VERSION=0x05020000;WIN32;_WINDOWS;NDEBUG;_CRT_SECURE_NO_WARNINGS;HPRDBGCTRL_EXPORTS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(SolutionDir)\Shared Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(SolutionDir)\dependencies\zydis\dependencies\zycore\include;$(SolutionDir)\include;$(SolutionDir)\dependencies\zydis\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <CompileAs>CompileAsCpp</CompileAs>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -93,27 +98,122 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>$(SolutionDir)libraries\zydis\Zycore.lib;$(SolutionDir)libraries\zydis\Zydis.lib;$(SolutionDir)Build\Release\script-engine.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Commands.h" />
-    <ClInclude Include="framework.h" />
-    <ClInclude Include="hprdbgctrl.h" />
+    <ClInclude Include="commands.h" />
+    <ClInclude Include="common.h" />
+    <ClInclude Include="debugger.h" />
+    <ClInclude Include="exports.h" />
+    <ClInclude Include="forwarding.h" />
+    <ClInclude Include="globals.h" />
+    <ClInclude Include="help.h" />
+    <ClInclude Include="install.h" />
+    <ClInclude Include="kd.h" />
+    <ClInclude Include="list.h" />
+    <ClInclude Include="namedpipe.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="communication.h" />
+    <ClInclude Include="tests.h" />
+    <ClInclude Include="transparency.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="attach.cpp" />
+    <ClCompile Include="bc.cpp" />
+    <ClCompile Include="bd.cpp" />
+    <ClCompile Include="be.cpp" />
+    <ClCompile Include="bl.cpp" />
+    <ClCompile Include="bp.cpp" />
+    <ClCompile Include="breakcontrol.cpp" />
+    <ClCompile Include="cls.cpp" />
+    <ClCompile Include="connect.cpp" />
+    <ClCompile Include="cpuid.cpp" />
+    <ClCompile Include="d-u.cpp" />
+    <ClCompile Include="debug.cpp" />
+    <ClCompile Include="debugger.cpp" />
+    <ClCompile Include="detach.cpp" />
+    <ClCompile Include="disconnect.cpp" />
+    <ClCompile Include="dr.cpp" />
+    <ClCompile Include="e.cpp" />
+    <ClCompile Include="epthook.cpp" />
+    <ClCompile Include="eval.cpp" />
+    <ClCompile Include="events.cpp" />
+    <ClCompile Include="exception.cpp" />
+    <ClCompile Include="exit.cpp" />
+    <ClCompile Include="flush.cpp" />
+    <ClCompile Include="formats.cpp" />
+    <ClCompile Include="epthook2.cpp" />
+    <ClCompile Include="forwarding.cpp" />
+    <ClCompile Include="g.cpp" />
+    <ClCompile Include="gaussian-rng.cpp" />
+    <ClCompile Include="help.cpp" />
+    <ClCompile Include="hide.cpp" />
+    <ClCompile Include="i.cpp" />
+    <ClCompile Include="interrupt.cpp" />
+    <ClCompile Include="ioin.cpp" />
+    <ClCompile Include="ioout.cpp" />
+    <ClCompile Include="kd.cpp" />
+    <ClCompile Include="listen.cpp" />
+    <ClCompile Include="listening.cpp" />
+    <ClCompile Include="load.cpp" />
+    <ClCompile Include="logclose.cpp" />
+    <ClCompile Include="logopen.cpp" />
+    <ClCompile Include="measure.cpp" />
+    <ClCompile Include="monitor.cpp" />
+    <ClCompile Include="msrread.cpp" />
+    <ClCompile Include="msrwrite.cpp" />
+    <ClCompile Include="namedpipe.cpp" />
+    <ClCompile Include="output.cpp" />
+    <ClCompile Include="p.cpp" />
+    <ClCompile Include="pa2va.cpp" />
+    <ClCompile Include="pause.cpp" />
+    <ClCompile Include="pmc.cpp" />
+    <ClCompile Include="print.cpp" />
+    <ClCompile Include="process.cpp" />
+    <ClCompile Include="pte.cpp" />
+    <ClCompile Include="r.cpp" />
+    <ClCompile Include="rdmsr.cpp" />
+    <ClCompile Include="readmem.cpp" />
+    <ClCompile Include="remoteconnection.cpp" />
+    <ClCompile Include="s.cpp" />
+    <ClCompile Include="script.cpp" />
+    <ClCompile Include="settings.cpp" />
+    <ClCompile Include="sewrapper.cpp" />
+    <ClCompile Include="sleep.cpp" />
+    <ClCompile Include="status.cpp" />
+    <ClCompile Include="syscall-sysret.cpp" />
+    <ClCompile Include="t.cpp" />
+    <ClCompile Include="tcpclient.cpp" />
+    <ClCompile Include="tcpserver.cpp" />
+    <ClCompile Include="test.cpp" />
+    <ClCompile Include="tests.cpp" />
+    <ClCompile Include="transparency.cpp" />
+    <ClCompile Include="tsc.cpp" />
+    <ClCompile Include="unhide.cpp" />
+    <ClCompile Include="unload.cpp" />
+    <ClCompile Include="va2pa.cpp" />
+    <ClCompile Include="vmcall.cpp" />
+    <ClCompile Include="wrmsr.cpp" />
+    <ClCompile Include="~.cpp" />
     <MASM Include="AsmVmxChecks.asm">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </MASM>
     <ClCompile Include="cpu.cpp" />
+    <ClCompile Include="disassembler.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Use</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="common.cpp" />
     <ClCompile Include="hprdbgctrl.cpp" />
-    <ClCompile Include="Install.cpp" />
+    <ClCompile Include="install.cpp" />
     <ClCompile Include="interpreter.cpp" />
+    <ClCompile Include="list.cpp" />
     <ClCompile Include="lm.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>

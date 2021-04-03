@@ -9,17 +9,7 @@
  * @copyright This project is released under the GNU Public License v3.
  * 
  */
-#include <ntddk.h>
-#include <wdf.h>
-#include <wdm.h>
-#include "Msr.h"
-#include "Vmx.h"
-#include "Common.h"
-#include "GlobalVariables.h"
-#include "Dpc.h"
-#include "InlineAsm.h"
-#include "Vpid.h"
-#include "Invept.h"
+#include "pch.h"
 
 /**
  * @brief Allocates Vmx regions for all logical cores (Vmxon region and Vmcs region)
@@ -35,14 +25,14 @@ VmxDpcBroadcastAllocateVmxonRegions(KDPC * Dpc, PVOID DeferredContext, PVOID Sys
 {
     int CurrentProcessorNumber = KeGetCurrentProcessorNumber();
 
-    LogInfo("Allocating Vmx Regions for logical core %d", CurrentProcessorNumber);
+    LogDebugInfo("Allocating Vmx Regions for logical core %d", CurrentProcessorNumber);
 
     //
     // Enabling VMX Operation
     //
     AsmEnableVmxOperation();
 
-    LogInfo("VMX-Operation Enabled Successfully");
+    LogDebugInfo("VMX-Operation Enabled Successfully");
 
     if (!VmxAllocateVmxonRegion(&g_GuestState[CurrentProcessorNumber]))
     {
@@ -116,19 +106,19 @@ VmxAllocateVmxonRegion(VIRTUAL_MACHINE_STATE * CurrentGuestState)
     RtlSecureZeroMemory(VmxonRegion, VmxonSize + ALIGNMENT_PAGE_SIZE);
 
     AlignedVmxonRegion = (BYTE *)((ULONG_PTR)(VmxonRegion + ALIGNMENT_PAGE_SIZE - 1) & ~(ALIGNMENT_PAGE_SIZE - 1));
-    LogInfo("VMXON Region Address : %llx", AlignedVmxonRegion);
+    LogDebugInfo("VMXON Region Address : %llx", AlignedVmxonRegion);
 
     //
     // 4 kb >= buffers are aligned, just a double check to ensure if it's aligned
     //
     AlignedVmxonRegionPhysicalAddr = (BYTE *)((ULONG_PTR)(VmxonRegionPhysicalAddr + ALIGNMENT_PAGE_SIZE - 1) & ~(ALIGNMENT_PAGE_SIZE - 1));
-    LogInfo("VMXON Region Physical Address : %llx", AlignedVmxonRegionPhysicalAddr);
+    LogDebugInfo("VMXON Region Physical Address : %llx", AlignedVmxonRegionPhysicalAddr);
 
     //
     // get IA32_VMX_BASIC_MSR RevisionId
     //
     VmxBasicMsr.All = __readmsr(MSR_IA32_VMX_BASIC);
-    LogInfo("Revision Identifier (MSR_IA32_VMX_BASIC - MSR 0x480) : 0x%x", VmxBasicMsr.Fields.RevisionIdentifier);
+    LogDebugInfo("Revision Identifier (MSR_IA32_VMX_BASIC - MSR 0x480) : 0x%x", VmxBasicMsr.Fields.RevisionIdentifier);
 
     //
     //Changing Revision Identifier
@@ -194,16 +184,16 @@ VmxAllocateVmcsRegion(VIRTUAL_MACHINE_STATE * CurrentGuestState)
     VmcsPhysicalAddr = VirtualAddressToPhysicalAddress(VmcsRegion);
 
     AlignedVmcsRegion = (BYTE *)((ULONG_PTR)(VmcsRegion + ALIGNMENT_PAGE_SIZE - 1) & ~(ALIGNMENT_PAGE_SIZE - 1));
-    LogInfo("VMCS Region Address : %llx", AlignedVmcsRegion);
+    LogDebugInfo("VMCS Region Address : %llx", AlignedVmcsRegion);
 
     AlignedVmcsRegionPhysicalAddr = (BYTE *)((ULONG_PTR)(VmcsPhysicalAddr + ALIGNMENT_PAGE_SIZE - 1) & ~(ALIGNMENT_PAGE_SIZE - 1));
-    LogInfo("VMCS Region Physical Address : %llx", AlignedVmcsRegionPhysicalAddr);
+    LogDebugInfo("VMCS Region Physical Address : %llx", AlignedVmcsRegionPhysicalAddr);
 
     //
     // get IA32_VMX_BASIC_MSR RevisionId
     //
     VmxBasicMsr.All = __readmsr(MSR_IA32_VMX_BASIC);
-    LogInfo("Revision Identifier (MSR_IA32_VMX_BASIC - MSR 0x480) : 0x%x", VmxBasicMsr.Fields.RevisionIdentifier);
+    LogDebugInfo("Revision Identifier (MSR_IA32_VMX_BASIC - MSR 0x480) : 0x%x", VmxBasicMsr.Fields.RevisionIdentifier);
 
     //
     //Changing Revision Identifier
@@ -244,7 +234,7 @@ VmxAllocateVmmStack(INT ProcessorID)
     }
     RtlZeroMemory(g_GuestState[ProcessorID].VmmStack, VMM_STACK_SIZE);
 
-    LogInfo("Vmm Stack for logical processor : 0x%llx", g_GuestState[ProcessorID].VmmStack);
+    LogDebugInfo("Vmm Stack for logical processor : 0x%llx", g_GuestState[ProcessorID].VmmStack);
 
     return TRUE;
 }
@@ -259,32 +249,67 @@ BOOLEAN
 VmxAllocateMsrBitmap(INT ProcessorID)
 {
     //
-    // Allocate memory for MSRBitMap
+    // Allocate memory for MSR Bitmap
     //
     g_GuestState[ProcessorID].MsrBitmapVirtualAddress = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, POOLTAG); // should be aligned
 
     if (g_GuestState[ProcessorID].MsrBitmapVirtualAddress == NULL)
     {
-        LogError("Insufficient memory in allocationg Msr bitmaps");
+        LogError("Insufficient memory in allocationg Msr Bitmaps");
         return FALSE;
     }
     RtlZeroMemory(g_GuestState[ProcessorID].MsrBitmapVirtualAddress, PAGE_SIZE);
 
     g_GuestState[ProcessorID].MsrBitmapPhysicalAddress = VirtualAddressToPhysicalAddress(g_GuestState[ProcessorID].MsrBitmapVirtualAddress);
 
-    LogInfo("Msr Bitmap Virtual Address : 0x%llx", g_GuestState[ProcessorID].MsrBitmapVirtualAddress);
-    LogInfo("Msr Bitmap Physical Address : 0x%llx", g_GuestState[ProcessorID].MsrBitmapPhysicalAddress);
+    LogDebugInfo("Msr Bitmap Virtual Address : 0x%llx", g_GuestState[ProcessorID].MsrBitmapVirtualAddress);
+    LogDebugInfo("Msr Bitmap Physical Address : 0x%llx", g_GuestState[ProcessorID].MsrBitmapPhysicalAddress);
+
+    return TRUE;
+}
+
+/**
+ * @brief Allocate a buffer forr I/O Bitmap
+ * 
+ * @param ProcessorID 
+ * @return BOOLEAN Returns true if allocation was successfull otherwise returns false
+ */
+BOOLEAN
+VmxAllocateIoBitmaps(INT ProcessorID)
+{
+    //
+    // Allocate memory for I/O Bitmap (A)
+    //
+    g_GuestState[ProcessorID].IoBitmapVirtualAddressA = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, POOLTAG); // should be aligned
+
+    if (g_GuestState[ProcessorID].IoBitmapVirtualAddressA == NULL)
+    {
+        LogError("Insufficient memory in allocationg I/O Bitmaps A");
+        return FALSE;
+    }
+    RtlZeroMemory(g_GuestState[ProcessorID].IoBitmapVirtualAddressA, PAGE_SIZE);
+
+    g_GuestState[ProcessorID].IoBitmapPhysicalAddressA = VirtualAddressToPhysicalAddress(g_GuestState[ProcessorID].IoBitmapVirtualAddressA);
+
+    LogDebugInfo("I/O Bitmap A Virtual Address : 0x%llx", g_GuestState[ProcessorID].IoBitmapVirtualAddressA);
+    LogDebugInfo("I/O Bitmap A Physical Address : 0x%llx", g_GuestState[ProcessorID].IoBitmapPhysicalAddressA);
 
     //
-    // (Uncomment if you want to break on RDMSR and WRMSR to a special MSR Register)
+    // Allocate memory for I/O Bitmap (B)
     //
-    //
-    // if (HvSetMsrBitmap(0xc0000082, ProcessorID, TRUE, TRUE))
-    // {
-    // 	LogError("Invalid parameters sent to the HvSetMsrBitmap function");
-    //	return FALSE;
-    // }
-    //
+    g_GuestState[ProcessorID].IoBitmapVirtualAddressB = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, POOLTAG); // should be aligned
+
+    if (g_GuestState[ProcessorID].IoBitmapVirtualAddressB == NULL)
+    {
+        LogError("Insufficient memory in allocationg I/O Bitmaps B");
+        return FALSE;
+    }
+    RtlZeroMemory(g_GuestState[ProcessorID].IoBitmapVirtualAddressB, PAGE_SIZE);
+
+    g_GuestState[ProcessorID].IoBitmapPhysicalAddressB = VirtualAddressToPhysicalAddress(g_GuestState[ProcessorID].IoBitmapVirtualAddressB);
+
+    LogDebugInfo("I/O Bitmap B Virtual Address : 0x%llx", g_GuestState[ProcessorID].IoBitmapVirtualAddressB);
+    LogDebugInfo("I/O Bitmap B Physical Address : 0x%llx", g_GuestState[ProcessorID].IoBitmapPhysicalAddressB);
 
     return TRUE;
 }

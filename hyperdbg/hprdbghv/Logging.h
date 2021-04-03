@@ -11,7 +11,6 @@
  */
 
 #pragma once
-#include "Definition.h"
 
 //////////////////////////////////////////////////
 //					Structures					//
@@ -64,27 +63,26 @@ typedef struct _LOG_BUFFER_INFORMATION
 
 } LOG_BUFFER_INFORMATION, *PLOG_BUFFER_INFORMATION;
 
-// Each core has one of the structure in g_GuestState
-typedef struct _DEBUGGER_CORE_EVENTS
-{
-    LIST_ENTRY HiddenHookRwEventsHead;          // HIDDEN_HOOK_RW  [WARNING : MAKE SURE TO INITIALIZE LIST HEAD]
-    LIST_ENTRY HiddenHooksExecDetourEventsHead; // HIDDEN_HOOK_EXEC_DETOUR [WARNING : MAKE SURE TO INITIALIZE LIST HEAD]
-    LIST_ENTRY HiddenHookExecCcEventsHead;      // HIDDEN_HOOK_EXEC_CC [WARNING : MAKE SURE TO INITIALIZE LIST HEAD]
-    LIST_ENTRY SyscallHooksEferEventsHead;      // SYSCALL_HOOK_EFER [WARNING : MAKE SURE TO INITIALIZE LIST HEAD]
-
-} DEBUGGER_CORE_EVENTS, *PDEBUGGER_CORE_EVENTS;
-
 //////////////////////////////////////////////////
 //				Global Variables				//
 //////////////////////////////////////////////////
 
-/* Global Variable for buffer on all cores */
+/**
+ * @brief Global Variable for buffer on all cores
+ * 
+ */
 LOG_BUFFER_INFORMATION * MessageBufferInformation;
 
-/* Vmx-root lock for logging */
+/**
+ * @brief Vmx-root lock for logging
+ * 
+ */
 volatile LONG VmxRootLoggingLock;
 
-/* Vmx-root lock for logging */
+/**
+ * @brief Vmx-root lock for logging
+ * 
+ */
 volatile LONG VmxRootLoggingLockForNonImmBuffers;
 
 //////////////////////////////////////////////////
@@ -92,6 +90,7 @@ volatile LONG VmxRootLoggingLockForNonImmBuffers;
 //////////////////////////////////////////////////
 
 /*
+
 A core buffer is like this , it's divided into MaximumPacketsCapacity chucks,
 each chunk has PacketChunkSize + sizeof(BUFFER_HEADER) size
 
@@ -141,19 +140,30 @@ each chunk has PacketChunkSize + sizeof(BUFFER_HEADER) size
 
 BOOLEAN
 LogInitialize();
+
 VOID
 LogUnInitialize();
+
 BOOLEAN
 LogSendBuffer(UINT32 OperationCode, PVOID Buffer, UINT32 BufferLength);
+
+UINT32
+LogMarkAllAsRead(BOOLEAN IsVmxRoot);
+
 BOOLEAN
 LogReadBuffer(BOOLEAN IsVmxRoot, PVOID BufferToSaveMessage, UINT32 * ReturnedLength);
+
 BOOLEAN
 LogCheckForNewMessage(BOOLEAN IsVmxRoot);
+
 BOOLEAN
 LogSendMessageToQueue(UINT32 OperationCode, BOOLEAN IsImmediateMessage, BOOLEAN ShowCurrentSystemTime, const char * Fmt, ...);
+
 VOID
 LogNotifyUsermodeCallback(PKDPC Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2);
+
 NTSTATUS
 LogRegisterEventBasedNotification(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+
 NTSTATUS
 LogRegisterIrpBasedNotification(PDEVICE_OBJECT DeviceObject, PIRP Irp);

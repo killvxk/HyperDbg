@@ -16,8 +16,6 @@
 #ifndef LDISASM_H
 #    define LDISASM_H
 
-#    include <ntddk.h>
-
 #    define LDISASM_R (*b >> 4)  // Four high-order bits of an opcode to index a row of the opcode table
 #    define LDISASM_C (*b & 0xF) // Four low-order bits to index a column of the table
 

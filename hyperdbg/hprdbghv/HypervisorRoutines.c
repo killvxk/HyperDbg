@@ -9,16 +9,7 @@
  * @copyright This project is released under the GNU Public License v3.
  * 
  */
-#include "Msr.h"
-#include "Vmx.h"
-#include "Common.h"
-#include "GlobalVariables.h"
-#include "HypervisorRoutines.h"
-#include "Invept.h"
-#include "InlineAsm.h"
-#include "Vpid.h"
-#include "Vmcall.h"
-#include "Dpc.h"
+#include "pch.h"
 
 /**
  * @brief Initialize Vmx operation
@@ -72,6 +63,17 @@ HvVmxInitialize()
         {
             //
             // Some error in allocating Msr Bitmaps
+            //
+            return FALSE;
+        }
+
+        //
+        // Allocating I/O Bit
+        //
+        if (!VmxAllocateIoBitmaps(ProcessorID))
+        {
+            //
+            // Some error in allocating I/O Bitmaps
             //
             return FALSE;
         }
@@ -166,7 +168,7 @@ HvSetGuestSelector(PVOID GdtBase, ULONG SegmentRegister, USHORT Selector)
     SEGMENT_SELECTOR SegmentSelector = {0};
     ULONG            AccessRights;
 
-    HvGetSegmentDescriptor(&SegmentSelector, Selector, GdtBase);
+    GetSegmentDescriptor(&SegmentSelector, Selector, GdtBase);
     AccessRights = ((PUCHAR)&SegmentSelector.ATTRIBUTES)[0] + (((PUCHAR)&SegmentSelector.ATTRIBUTES)[1] << 12);
 
     if (!Selector)
@@ -181,59 +183,6 @@ HvSetGuestSelector(PVOID GdtBase, ULONG SegmentRegister, USHORT Selector)
 }
 
 /**
- * @brief Get Segment Descriptor
- * 
- * @param SegmentSelector 
- * @param Selector 
- * @param GdtBase 
- * @return BOOLEAN 
- */
-BOOLEAN
-HvGetSegmentDescriptor(PSEGMENT_SELECTOR SegmentSelector, USHORT Selector, PUCHAR GdtBase)
-{
-    PSEGMENT_DESCRIPTOR SegDesc;
-
-    if (!SegmentSelector)
-        return FALSE;
-
-    if (Selector & 0x4)
-    {
-        return FALSE;
-    }
-
-    SegDesc = (PSEGMENT_DESCRIPTOR)((PUCHAR)GdtBase + (Selector & ~0x7));
-
-    SegmentSelector->SEL               = Selector;
-    SegmentSelector->BASE              = SegDesc->BASE0 | SegDesc->BASE1 << 16 | SegDesc->BASE2 << 24;
-    SegmentSelector->LIMIT             = SegDesc->LIMIT0 | (SegDesc->LIMIT1ATTR1 & 0xf) << 16;
-    SegmentSelector->ATTRIBUTES.UCHARs = SegDesc->ATTR0 | (SegDesc->LIMIT1ATTR1 & 0xf0) << 4;
-
-    if (!(SegDesc->ATTR0 & 0x10))
-    {
-        //
-        // LA_ACCESSED
-        //
-        ULONG64 tmp;
-
-        //
-        // this is a TSS or callgate etc, save the base high part
-        //
-        tmp                   = (*(PULONG64)((PUCHAR)SegDesc + 8));
-        SegmentSelector->BASE = (SegmentSelector->BASE & 0xffffffff) | (tmp << 32);
-    }
-
-    if (SegmentSelector->ATTRIBUTES.Fields.G)
-    {
-        //
-        // 4096-bit granularity is enabled for this segment, scale the limit
-        //
-        SegmentSelector->LIMIT = (SegmentSelector->LIMIT << 12) + 0xfff;
-    }
-
-    return TRUE;
-}
-
-/**
  * @brief Handle Cpuid Vmexits
  * 
  * @param RegistersState Guest's gp registers
@@ -242,8 +191,14 @@ HvGetSegmentDescriptor(PSEGMENT_SELECTOR SegmentSelector, USHORT Selector, PUCHA
 VOID
 HvHandleCpuid(PGUEST_REGS RegistersState)
 {
-    INT32 cpu_info[4];
-    ULONG Mode = 0;
+    INT32  cpu_info[4];
+    ULONG  Mode    = 0;
+    UINT64 Context = 0;
+
+    //
+    // Set the context (save eax for the debugger)
+    //
+    Context = RegistersState->rax;
 
     //
     // Otherwise, issue the CPUID to the logical processor based on the indexes
@@ -252,37 +207,45 @@ HvHandleCpuid(PGUEST_REGS RegistersState)
     __cpuidex(cpu_info, (INT32)RegistersState->rax, (INT32)RegistersState->rcx);
 
     //
-    // Check if this was CPUID 1h, which is the features request
+    // check whether we are in transparent mode or not
+    // if we are in transparent mode then ignore the
+    // cpuid modifications e.g. hyperviosr name or bit
     //
-    if (RegistersState->rax == CPUID_PROCESSOR_AND_PROCESSOR_FEATURE_IDENTIFIERS)
+    if (!g_TransparentMode)
     {
         //
-        // Set the Hypervisor Present-bit in RCX, which Intel and AMD have both
-        // reserved for this indication
+        // Check if this was CPUID 1h, which is the features request
         //
-        cpu_info[2] |= HYPERV_HYPERVISOR_PRESENT_BIT;
-    }
-    else if (RegistersState->rax == CPUID_HV_VENDOR_AND_MAX_FUNCTIONS)
-    {
-        //
-        // Return a maximum supported hypervisor CPUID leaf range and a vendor
-        // ID signature as required by the spec
-        //
+        if (RegistersState->rax == CPUID_PROCESSOR_AND_PROCESSOR_FEATURE_IDENTIFIERS)
+        {
+            //
+            // Set the Hypervisor Present-bit in RCX, which Intel and AMD have both
+            // reserved for this indication
+            //
+            cpu_info[2] |= HYPERV_HYPERVISOR_PRESENT_BIT;
+        }
+        else if (RegistersState->rax == CPUID_HV_VENDOR_AND_MAX_FUNCTIONS)
+        {
+            //
+            // Return a maximum supported hypervisor CPUID leaf range and a vendor
+            // ID signature as required by the spec
+            //
 
-        cpu_info[0] = HYPERV_CPUID_INTERFACE;
-        cpu_info[1] = 'epyH'; /* "[Hyperdbg] [H]yper[v]isor = HyperdbgHv" */
-        cpu_info[2] = 'gbdr';
-        cpu_info[3] = '  vH';
-    }
-    else if (RegistersState->rax == HYPERV_CPUID_INTERFACE)
-    {
-        //
-        // Return non Hv#1 value. This indicate that our hypervisor does NOT
-        // conform to the Microsoft hypervisor interface.
-        //
+            cpu_info[0] = HYPERV_CPUID_INTERFACE;
+            cpu_info[1] = 'epyH'; // [HyperDbg.com]
+            cpu_info[2] = 'gbDr';
+            cpu_info[3] = 'moc.';
+        }
+        else if (RegistersState->rax == HYPERV_CPUID_INTERFACE)
+        {
+            //
+            // Return non Hv#1 value. This indicate that our hypervisor does NOT
+            // conform to the Microsoft hypervisor interface.
+            //
 
-        cpu_info[0] = '0#vH'; // Hv#0
-        cpu_info[1] = cpu_info[2] = cpu_info[3] = 0;
+            cpu_info[0] = '0#vH'; // Hv#0
+            cpu_info[1] = cpu_info[2] = cpu_info[3] = 0;
+        }
     }
 
     //
@@ -292,22 +255,33 @@ HvHandleCpuid(PGUEST_REGS RegistersState)
     RegistersState->rbx = cpu_info[1];
     RegistersState->rcx = cpu_info[2];
     RegistersState->rdx = cpu_info[3];
+
+    //
+    // As the context to event trigger, we send the eax before the cpuid
+    // so that the debugger can both read the eax as it's now changed by
+    // the cpuid instruction and also can modify the results
+    //
+    if (g_TriggerEventForCpuids)
+    {
+        DebuggerTriggerEvents(CPUID_INSTRUCTION_EXECUTION, RegistersState, Context);
+    }
 }
 
 /**
  * @brief Handles Guest Access to control registers
  * 
  * @param GuestState Guest's gp registers
+ * @param ProcessorIndex Index of processor
  * @return VOID 
  */
 VOID
-HvHandleControlRegisterAccess(PGUEST_REGS GuestState)
+HvHandleControlRegisterAccess(PGUEST_REGS GuestState, UINT32 ProcessorIndex)
 {
     ULONG                 ExitQualification = 0;
     PMOV_CR_QUALIFICATION CrExitQualification;
     PULONG64              RegPtr;
-    INT64                 GuestRsp = 0;
     UINT64                NewCr3;
+    CR3_TYPE              NewCr3Reg;
 
     __vmx_vmread(EXIT_QUALIFICATION, &ExitQualification);
 
@@ -319,11 +293,18 @@ HvHandleControlRegisterAccess(PGUEST_REGS GuestState)
     // Because its RSP and as we didn't save RSP correctly (because of pushes)
     // so we have make it points to the GUEST_RSP
     //
+
+    //
+    // We handled it in vm-exit handler, commented
+    //
+
+    /*    
     if (CrExitQualification->Fields.Register == 4)
     {
         __vmx_vmread(GUEST_RSP, &GuestRsp);
         *RegPtr = GuestRsp;
     }
+    */
 
     switch (CrExitQualification->Fields.AccessType)
     {
@@ -337,9 +318,28 @@ HvHandleControlRegisterAccess(PGUEST_REGS GuestState)
             break;
         case 3:
             NewCr3 = (*RegPtr & ~(1ULL << 63));
-            LogInfo("New process cr3 : 0x%llx , Proc id = : 0x%x", NewCr3, PsGetCurrentProcessId());
-            __vmx_vmwrite(GUEST_CR3, (*RegPtr & ~(1ULL << 63)));
+
+            //
+            // Check if we are in debugging thread's steppings or not
+            //
+            if (g_EnableDebuggerSteppings)
+            {
+                NewCr3Reg.Flags = NewCr3;
+                SteppingsHandleCr3Vmexits(NewCr3Reg, ProcessorIndex);
+            }
+
+            //
+            // Apply the new cr3
+            //
+            __vmx_vmwrite(GUEST_CR3, NewCr3);
+
+            //
+            // Invalidate as we used VPID tags so the vm-exit won't
+            // normally (automatically) flush the tlb, we have to do
+            // it manually
+            //
             InvvpidSingleContext(VPID_TAG);
+
             break;
         case 4:
             __vmx_vmwrite(GUEST_CR4, *RegPtr);
@@ -393,7 +393,7 @@ HvFillGuestSelectorData(PVOID GdtBase, ULONG SegmentRegister, USHORT Selector)
     SEGMENT_SELECTOR SegmentSelector = {0};
     ULONG            AccessRights;
 
-    HvGetSegmentDescriptor(&SegmentSelector, Selector, GdtBase);
+    GetSegmentDescriptor(&SegmentSelector, Selector, GdtBase);
     AccessRights = ((PUCHAR)&SegmentSelector.ATTRIBUTES)[0] + (((PUCHAR)&SegmentSelector.ATTRIBUTES)[1] << 12);
 
     if (!Selector)
@@ -454,8 +454,6 @@ HvHandleMsrRead(PGUEST_REGS GuestRegs)
     //
     if (GuestRegs->rcx == MSR_EFER)
     {
-        DbgBreakPoint();
-
         EFER_MSR MsrEFER;
         MsrEFER.Flags         = msr.Content;
         MsrEFER.SyscallEnable = TRUE;
@@ -506,8 +504,8 @@ HvHandleMsrWrite(PGUEST_REGS GuestRegs)
  * 
  * @param Msr MSR Address
  * @param ProcessorID Processor to set MSR Bitmap for it
- * @param ReadDetection Unset read bit 
- * @param WriteDetection Unset write bit
+ * @param ReadDetection set read bit 
+ * @param WriteDetection set write bit
  * @return BOOLEAN Returns true if the MSR Bitmap is succcessfully applied or false if not applied
  */
 BOOLEAN
@@ -525,22 +523,71 @@ HvSetMsrBitmap(ULONG64 Msr, INT ProcessorID, BOOLEAN ReadDetection, BOOLEAN Writ
     {
         if (ReadDetection)
         {
-            SetBit(g_GuestState[ProcessorID].MsrBitmapVirtualAddress, Msr, TRUE);
+            SetBit(Msr, g_GuestState[ProcessorID].MsrBitmapVirtualAddress);
         }
         if (WriteDetection)
         {
-            SetBit(g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 2048, Msr, TRUE);
+            SetBit(Msr, g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 2048);
         }
     }
     else if ((0xC0000000 <= Msr) && (Msr <= 0xC0001FFF))
     {
         if (ReadDetection)
         {
-            SetBit(g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 1024, Msr - 0xC0000000, TRUE);
+            SetBit(Msr - 0xC0000000, g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 1024);
         }
         if (WriteDetection)
         {
-            SetBit(g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 3072, Msr - 0xC0000000, TRUE);
+            SetBit(Msr - 0xC0000000, g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 3072);
+        }
+    }
+    else
+    {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/**
+ * @brief UnSet bits in Msr Bitmap
+ * 
+ * @param Msr MSR Address
+ * @param ProcessorID Processor to set MSR Bitmap for it
+ * @param ReadDetection Unset read bit 
+ * @param WriteDetection Unset write bit
+ * @return BOOLEAN Returns true if the MSR Bitmap is succcessfully applied or false if not applied
+ */
+BOOLEAN
+HvUnSetMsrBitmap(ULONG64 Msr, INT ProcessorID, BOOLEAN ReadDetection, BOOLEAN WriteDetection)
+{
+    if (!ReadDetection && !WriteDetection)
+    {
+        //
+        // Invalid Command
+        //
+        return FALSE;
+    }
+
+    if (Msr <= 0x00001FFF)
+    {
+        if (ReadDetection)
+        {
+            ClearBit(Msr, g_GuestState[ProcessorID].MsrBitmapVirtualAddress);
+        }
+        if (WriteDetection)
+        {
+            ClearBit(Msr, g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 2048);
+        }
+    }
+    else if ((0xC0000000 <= Msr) && (Msr <= 0xC0001FFF))
+    {
+        if (ReadDetection)
+        {
+            ClearBit(Msr - 0xC0000000, g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 1024);
+        }
+        if (WriteDetection)
+        {
+            ClearBit(Msr - 0xC0000000, g_GuestState[ProcessorID].MsrBitmapVirtualAddress + 3072);
         }
     }
     else
@@ -631,9 +678,15 @@ HvReturnInstructionPointerForVmxoff()
     return g_GuestState[KeGetCurrentProcessorNumber()].VmxoffState.GuestRip;
 }
 
-//
-// The broadcast function which initialize the guest
-//
+/**
+ * @brief The broadcast function which initialize the guest
+ * 
+ * @param Dpc 
+ * @param DeferredContext 
+ * @param SystemArgument1 
+ * @param SystemArgument2 
+ * @return VOID 
+ */
 VOID
 HvDpcBroadcastInitializeGuest(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
 {
@@ -660,16 +713,21 @@ HvDpcBroadcastInitializeGuest(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArg
 VOID
 HvTerminateVmx()
 {
-    LogInfo("Terminating VMX...\n");
+    LogDebugInfo("Terminating VMX...\n");
 
     //
     // ******* Terminating Vmx *******
     //
 
     //
+    // Unhide (disable and de-allocate) transparent-mode
+    //
+    TransparentUnhideDebugger();
+
+    //
     // Remve All the hooks if any
     //
-    HvPerformPageUnHookAllPages();
+    EptHookUnHookAll();
 
     //
     // Broadcast to terminate Vmx
@@ -695,7 +753,7 @@ HvTerminateVmx()
     //
     PoolManagerUninitialize();
 
-    LogInfo("VMX Operation turned off successfully :)\n");
+    LogDebugInfo("VMX Operation turned off successfully");
 }
 
 /**
@@ -741,7 +799,7 @@ HvSetMonitorTrapFlag(BOOLEAN Set)
     ULONG CpuBasedVmExecControls = 0;
 
     //
-    // Read the previous flag
+    // Read the previous flags
     //
     __vmx_vmread(CPU_BASED_VM_EXEC_CONTROL, &CpuBasedVmExecControls);
 
@@ -753,6 +811,7 @@ HvSetMonitorTrapFlag(BOOLEAN Set)
     {
         CpuBasedVmExecControls &= ~CPU_BASED_MONITOR_TRAP_FLAG;
     }
+
     //
     // Set the new value
     //
@@ -760,34 +819,65 @@ HvSetMonitorTrapFlag(BOOLEAN Set)
 }
 
 /**
- * @brief Set the vm-exit on cr3 for finding a process
+ * @brief Set LOAD DEBUG CONTROLS on Vm-entry controls
  * 
- * @param Set Set or Unset the controls relationg to cr3 load exit
+ * @param Set Set or unset 
  * @return VOID 
  */
 VOID
-HvSetExitOnCr3Change(BOOLEAN Set)
+HvSetLoadDebugControls(BOOLEAN Set)
 {
-    ULONG CpuBasedVmExecControls = 0;
+    ULONG VmentryControls = 0;
 
     //
-    // Read the previous flag
+    // Read the previous flags
     //
-    __vmx_vmread(CPU_BASED_VM_EXEC_CONTROL, &CpuBasedVmExecControls);
+    __vmx_vmread(VM_ENTRY_CONTROLS, &VmentryControls);
 
     if (Set)
     {
-        CpuBasedVmExecControls |= CPU_BASED_CR3_LOAD_EXITING;
+        VmentryControls |= VM_ENTRY_LOAD_DEBUG_CONTROLS;
     }
     else
     {
-        CpuBasedVmExecControls &= ~CPU_BASED_CR3_LOAD_EXITING;
+        VmentryControls &= ~VM_ENTRY_LOAD_DEBUG_CONTROLS;
     }
 
     //
     // Set the new value
     //
-    __vmx_vmwrite(CPU_BASED_VM_EXEC_CONTROL, CpuBasedVmExecControls);
+    __vmx_vmwrite(VM_ENTRY_CONTROLS, VmentryControls);
+}
+
+/**
+ * @brief Set SAVE DEBUG CONTROLS on Vm-exit controls
+ * 
+ * @param Set Set or unset 
+ * @return VOID 
+ */
+VOID
+HvSetSaveDebugControls(BOOLEAN Set)
+{
+    ULONG VmexitControls = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(VM_EXIT_CONTROLS, &VmexitControls);
+
+    if (Set)
+    {
+        VmexitControls |= VM_EXIT_SAVE_DEBUG_CONTROLS;
+    }
+    else
+    {
+        VmexitControls &= ~VM_EXIT_SAVE_DEBUG_CONTROLS;
+    }
+
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(VM_EXIT_CONTROLS, VmexitControls);
 }
 
 /**
@@ -891,78 +981,803 @@ HvDpcBroadcastRemoveHookAndInvalidateSingleEntry(KDPC * Dpc, PVOID DeferredConte
 }
 
 /**
- * @brief Remove single hook from the hooked pages list and invalidate TLB
- * @details Should be called from vmx non-root
- * 
- * @param VirtualAddress Virtual address to unhook
- * @return BOOLEAN If unhook was successful it returns true or if it was not successful returns false
+ * @brief Change MSR Bitmap for read
+ * @details should be called in vmx-root mode
+ * @param 
+ * @return VOID 
  */
-BOOLEAN
-HvPerformPageUnHookSinglePage(UINT64 VirtualAddress)
+VOID
+HvPerformMsrBitmapReadChange(UINT64 MsrMask)
 {
-    PLIST_ENTRY TempList = 0;
-    SIZE_T      PhysicalAddress;
+    UINT32 CoreIndex = KeGetCurrentProcessorNumber();
 
-    PhysicalAddress = PAGE_ALIGN(VirtualAddressToPhysicalAddress(VirtualAddress));
-
-    //
-    // Should be called from vmx non-root
-    //
-    if (g_GuestState[KeGetCurrentProcessorNumber()].IsOnVmxRootMode)
+    if (MsrMask == DEBUGGER_EVENT_MSR_READ_OR_WRITE_ALL_MSRS)
     {
-        return FALSE;
+        //
+        // Means all the bitmaps should be put to 1
+        //
+        memset(g_GuestState[CoreIndex].MsrBitmapVirtualAddress, 0xff, 2048);
     }
-
-    TempList = &g_EptState->HookedPagesList;
-    while (&g_EptState->HookedPagesList != TempList->Flink)
+    else
     {
-        TempList                            = TempList->Flink;
-        PEPT_HOOKED_PAGE_DETAIL HookedEntry = CONTAINING_RECORD(TempList, EPT_HOOKED_PAGE_DETAIL, PageHookList);
-
-        if (HookedEntry->PhysicalBaseAddress == PhysicalAddress)
-        {
-            //
-            // Remove it in all the cores
-            //
-            KeGenericCallDpc(HvDpcBroadcastRemoveHookAndInvalidateSingleEntry, HookedEntry->PhysicalBaseAddress);
-
-            //
-            // remove the entry from the list
-            //
-            RemoveEntryList(HookedEntry->PageHookList.Flink);
-
-            return TRUE;
-        }
+        //
+        // Means only one msr bitmap is target
+        //
+        HvSetMsrBitmap(MsrMask, CoreIndex, TRUE, FALSE);
     }
-    //
-    // Nothing found , probably the list is not found
-    //
-    return FALSE;
 }
 
 /**
- * @brief Remove all hooks from the hooked pages list and invalidate TLB
- * @detailsShould be called from Vmx Non-root
+ * @brief Reset MSR Bitmap for read
+ * @details should be called in vmx-root mode
+ * @return VOID 
+ */
+VOID
+HvPerformMsrBitmapReadReset()
+{
+    UINT32 CoreIndex = KeGetCurrentProcessorNumber();
+
+    //
+    // Means all the bitmaps should be put to 0
+    //
+    memset(g_GuestState[CoreIndex].MsrBitmapVirtualAddress, 0x0, 2048);
+}
+/**
+ * @brief Change MSR Bitmap for write
+ * @details should be called in vmx-root mode
+ * @param MsrMask MSR
+ * @return VOID 
+ */
+VOID
+HvPerformMsrBitmapWriteChange(UINT64 MsrMask)
+{
+    UINT32 CoreIndex = KeGetCurrentProcessorNumber();
+
+    if (MsrMask == DEBUGGER_EVENT_MSR_READ_OR_WRITE_ALL_MSRS)
+    {
+        //
+        // Means all the bitmaps should be put to 1
+        //
+        memset((UINT64)g_GuestState[CoreIndex].MsrBitmapVirtualAddress + 2048, 0xff, 2048);
+    }
+    else
+    {
+        //
+        // Means only one msr bitmap is target
+        //
+        HvSetMsrBitmap(MsrMask, CoreIndex, FALSE, TRUE);
+    }
+}
+
+/**
+ * @brief Reset MSR Bitmap for write
+ * @details should be called in vmx-root mode
+ * @return VOID 
+ */
+VOID
+HvPerformMsrBitmapWriteReset()
+{
+    UINT32 CoreIndex = KeGetCurrentProcessorNumber();
+
+    //
+    // Means all the bitmaps should be put to 0
+    //
+    memset((UINT64)g_GuestState[CoreIndex].MsrBitmapVirtualAddress + 2048, 0x0, 2048);
+}
+
+/**
+ * @brief Set vm-exit for tsc instructions (rdtsc/rdtscp) 
+ * @details Should be called in vmx-root
+ * 
+ * @param Set Set or unset the vm-exits
+ * @return VOID 
+ */
+VOID
+HvSetTscVmexit(BOOLEAN Set)
+{
+    ULONG CpuBasedVmExecControls = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(CPU_BASED_VM_EXEC_CONTROL, &CpuBasedVmExecControls);
+
+    if (Set)
+    {
+        CpuBasedVmExecControls |= CPU_BASED_RDTSC_EXITING;
+    }
+    else
+    {
+        CpuBasedVmExecControls &= ~CPU_BASED_RDTSC_EXITING;
+    }
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(CPU_BASED_VM_EXEC_CONTROL, CpuBasedVmExecControls);
+}
+
+/**
+ * @brief Set vm-exit for rdpmc instructions 
+ * @details Should be called in vmx-root
+ * 
+ * @param Set Set or unset the vm-exits
+ * @return VOID 
+ */
+VOID
+HvSetPmcVmexit(BOOLEAN Set)
+{
+    ULONG CpuBasedVmExecControls = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(CPU_BASED_VM_EXEC_CONTROL, &CpuBasedVmExecControls);
+
+    if (Set)
+    {
+        CpuBasedVmExecControls |= CPU_BASED_RDPMC_EXITING;
+    }
+    else
+    {
+        CpuBasedVmExecControls &= ~CPU_BASED_RDPMC_EXITING;
+    }
+
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(CPU_BASED_VM_EXEC_CONTROL, CpuBasedVmExecControls);
+}
+
+/**
+ * @brief Set vm-exit for mov-to-cr3 
+ * @details Should be called in vmx-root
+ * 
+ * @param Set Set or unset the vm-exits
+ * @return VOID 
+ */
+VOID
+HvSetMovToCr3Vmexit(BOOLEAN Set)
+{
+    ULONG CpuBasedVmExecControls = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(CPU_BASED_VM_EXEC_CONTROL, &CpuBasedVmExecControls);
+
+    if (Set)
+    {
+        CpuBasedVmExecControls |= CPU_BASED_CR3_LOAD_EXITING;
+    }
+    else
+    {
+        CpuBasedVmExecControls &= ~CPU_BASED_CR3_LOAD_EXITING;
+    }
+
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(CPU_BASED_VM_EXEC_CONTROL, CpuBasedVmExecControls);
+}
+
+/**
+ * @brief Set exception bitmap in VMCS 
+ * @details Should be called in vmx-root
+ * 
+ * @param IdtIndex Interrupt Descriptor Table index of exception 
+ * @return VOID 
+ */
+VOID
+HvSetExceptionBitmap(UINT32 IdtIndex)
+{
+    UINT32 ExceptionBitmap = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(EXCEPTION_BITMAP, &ExceptionBitmap);
+
+    if (IdtIndex == DEBUGGER_EVENT_EXCEPTIONS_ALL_FIRST_32_ENTRIES)
+    {
+        ExceptionBitmap = 0xffffffff;
+    }
+    else
+    {
+        ExceptionBitmap |= 1 << IdtIndex;
+    }
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(EXCEPTION_BITMAP, ExceptionBitmap);
+}
+
+/**
+ * @brief Reset exception bitmap in VMCS 
+ * @details Should be called in vmx-root
  * 
  * @return VOID 
  */
 VOID
-HvPerformPageUnHookAllPages()
+HvResetExceptionBitmap()
 {
+    UINT32 ExceptionBitmap = 0;
+
     //
-    // Should be called from vmx non-root
+    // Set the new value
     //
-    if (g_GuestState[KeGetCurrentProcessorNumber()].IsOnVmxRootMode)
+    __vmx_vmwrite(EXCEPTION_BITMAP, ExceptionBitmap);
+}
+
+/**
+ * @brief Unset exception bitmap in VMCS 
+ * @details Should be called in vmx-root
+ * 
+ * @param IdtIndex Interrupt Descriptor Table index of exception 
+ * @return VOID 
+ */
+VOID
+HvUnsetExceptionBitmap(UINT32 IdtIndex)
+{
+    UINT32 ExceptionBitmap = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(EXCEPTION_BITMAP, &ExceptionBitmap);
+
+    if (IdtIndex == DEBUGGER_EVENT_EXCEPTIONS_ALL_FIRST_32_ENTRIES)
     {
+        ExceptionBitmap = 0x0;
+    }
+    else
+    {
+        ExceptionBitmap &= ~(1 << IdtIndex);
+    }
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(EXCEPTION_BITMAP, ExceptionBitmap);
+}
+
+/**
+ * @brief Set Interrupt-window exiting
+ * 
+ * @param Set Set or unset the Interrupt Window-exiting
+ * @return VOID 
+ */
+VOID
+HvSetInterruptWindowExiting(BOOLEAN Set)
+{
+    ULONG CpuBasedVmExecControls = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(CPU_BASED_VM_EXEC_CONTROL, &CpuBasedVmExecControls);
+
+    //
+    // interrupt-window exiting
+    //
+    if (Set)
+    {
+        CpuBasedVmExecControls |= CPU_BASED_VIRTUAL_INTR_PENDING;
+    }
+    else
+    {
+        CpuBasedVmExecControls &= ~CPU_BASED_VIRTUAL_INTR_PENDING;
+    }
+
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(CPU_BASED_VM_EXEC_CONTROL, CpuBasedVmExecControls);
+}
+
+/**
+ * @brief Set the nmi-Window exiting
+ * 
+ * @param Set Set or unset the Interrupt Window-exiting
+ * @return VOID 
+ */
+VOID
+HvSetNmiWindowExiting(BOOLEAN Set)
+{
+    ULONG CpuBasedVmExecControls = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(CPU_BASED_VM_EXEC_CONTROL, &CpuBasedVmExecControls);
+
+    //
+    // nmi-window exiting
+    //
+    if (Set)
+    {
+        CpuBasedVmExecControls |= CPU_BASED_VIRTUAL_NMI_PENDING;
+    }
+    else
+    {
+        CpuBasedVmExecControls &= ~CPU_BASED_VIRTUAL_NMI_PENDING;
+    }
+
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(CPU_BASED_VM_EXEC_CONTROL, CpuBasedVmExecControls);
+}
+
+/**
+ * @brief Handle Mov to Debug Registers Exitings
+ * 
+ * @param ProcessorIndex Index of processor
+ * @param Regs Registers of guest
+ * @return VOID 
+ */
+VOID
+HvHandleMovDebugRegister(UINT32 ProcessorIndex, PGUEST_REGS Regs)
+{
+    MOV_TO_DEBUG_REG_QUALIFICATION ExitQualification;
+    CONTROL_REGISTER_4             Cr4;
+    DEBUG_REGISTER_7               Dr7;
+    SEGMENT_SELECTOR               Cs;
+    UINT64 *                       GpRegs = Regs;
+    //
+    // The implementation is derived from Hvpp
+    //
+    __vmx_vmread(EXIT_QUALIFICATION, &ExitQualification);
+
+    UINT64 GpRegister = GpRegs[ExitQualification.GpRegister];
+
+    //
+    // The MOV DR instruction causes a VM exit if the "MOV-DR exiting"
+    // VM-execution control is 1.  Such VM exits represent an exception
+    // to the principles identified in Section 25.1.1 (Relative Priority
+    // of Faults and VM Exits) in that they take priority over the
+    // following: general-protection exceptions based on privilege level;
+    // and invalid-opcode exceptions that occur because CR4.DE = 1 and the
+    // instruction specified access to DR4 or DR5.
+    // (ref: Vol3C[25.1.3(Instructions That Cause VM Exits Conditionally)])
+    //
+    // TL;DR:
+    //   CPU usually prioritizes exceptions.  For example RDMSR executed
+    //   at CPL = 3 won't cause VM-exit - it causes #GP instead.  MOV DR
+    //   is exception to this rule, as it ALWAYS cause VM-exit.
+    //
+    //   Normally, CPU allows you to write to DR registers only at CPL=0,
+    //   otherwise it causes #GP.  Therefore we'll simulate the exact same
+    //   behavior here.
+    //
+
+    Cs = GetGuestCs();
+
+    if (Cs.ATTRIBUTES.Fields.DPL != 0)
+    {
+        EventInjectGeneralProtection();
+
+        //
+        // Redo the instruction
+        //
+        g_GuestState[ProcessorIndex].IncrementRip = FALSE;
         return;
     }
 
     //
-    // Remove it in all the cores
+    // Debug registers DR4 and DR5 are reserved when debug extensions
+    // are enabled (when the DE flag in control register CR4 is set)
+    // and attempts to reference the DR4 and DR5 registers cause
+    // invalid-opcode exceptions (#UD).
+    // When debug extensions are not enabled (when the DE flag is clear),
+    // these registers are aliased to debug registers DR6 and DR7.
+    // (ref: Vol3B[17.2.2(Debug Registers DR4 and DR5)])
     //
-    KeGenericCallDpc(HvDpcBroadcastRemoveHookAndInvalidateAllEntries, 0x0);
 
     //
-    // No need to remove the list as it will automatically remove by the pool uninitializer
+    // Read guest cr4
     //
+    __vmx_vmread(GUEST_CR4, &Cr4);
+
+    if (ExitQualification.DrNumber == 4 || ExitQualification.DrNumber == 5)
+    {
+        if (Cr4.DebuggingExtensions)
+        {
+            //
+            // re-inject #UD
+            //
+            EventInjectUndefinedOpcode(ProcessorIndex);
+            return;
+        }
+        else
+        {
+            ExitQualification.DrNumber += 2;
+        }
+    }
+
+    //
+    // Enables (when set) debug-register protection, which causes a
+    // debug exception to be generated prior to any MOV instruction
+    // that accesses a debug register.  When such a condition is
+    // detected, the BD flag in debug status register DR6 is set prior
+    // to generating the exception.  This condition is provided to
+    // support in-circuit emulators.
+    // When the emulator needs to access the debug registers, emulator
+    // software can set the GD flag to prevent interference from the
+    // program currently executing on the processor.
+    // The processor clears the GD flag upon entering to the debug
+    // exception handler, to allow the handler access to the debug
+    // registers.
+    // (ref: Vol3B[17.2.4(Debug Control Register (DR7)])
+    //
+
+    //
+    // Read the DR7
+    //
+    __vmx_vmread(GUEST_DR7, &Dr7);
+
+    if (Dr7.GeneralDetect)
+    {
+        DEBUG_REGISTER_6 Dr6;
+        Dr6.Flags                       = __readdr(6);
+        Dr6.BreakpointCondition         = 0;
+        Dr6.DebugRegisterAccessDetected = TRUE;
+        __writedr(6, Dr6.Flags);
+
+        Dr7.GeneralDetect = FALSE;
+
+        __vmx_vmwrite(GUEST_DR7, Dr7.Flags);
+
+        EventInjectDebugBreakpoint();
+
+        //
+        // Redo the instruction
+        //
+        g_GuestState[ProcessorIndex].IncrementRip = FALSE;
+        return;
+    }
+
+    //
+    // In 64-bit mode, the upper 32 bits of DR6 and DR7 are reserved
+    // and must be written with zeros.  Writing 1 to any of the upper
+    // 32 bits results in a #GP(0) exception.
+    // (ref: Vol3B[17.2.6(Debug Registers and Intel� 64 Processors)])
+    //
+    if (ExitQualification.AccessType == AccessToDebugRegister &&
+        (ExitQualification.DrNumber == 6 || ExitQualification.DrNumber == 7) &&
+        (GpRegister >> 32) != 0)
+    {
+        EventInjectGeneralProtection();
+
+        //
+        // Redo the instruction
+        //
+        g_GuestState[ProcessorIndex].IncrementRip = FALSE;
+        return;
+    }
+
+    switch (ExitQualification.AccessType)
+    {
+    case AccessToDebugRegister:
+        switch (ExitQualification.DrNumber)
+        {
+        case 0:
+            __writedr(0, GpRegister);
+            break;
+        case 1:
+            __writedr(1, GpRegister);
+            break;
+        case 2:
+            __writedr(2, GpRegister);
+            break;
+        case 3:
+            __writedr(3, GpRegister);
+            break;
+        case 6:
+            __writedr(6, GpRegister);
+            break;
+        case 7:
+            __writedr(7, GpRegister);
+            break;
+        default:
+            break;
+        }
+        break;
+
+    case AccessFromDebugRegister:
+        switch (ExitQualification.DrNumber)
+        {
+        case 0:
+            GpRegister = __readdr(0);
+            break;
+        case 1:
+            GpRegister = __readdr(1);
+            break;
+        case 2:
+            GpRegister = __readdr(2);
+            break;
+        case 3:
+            GpRegister = __readdr(3);
+            break;
+        case 6:
+            GpRegister = __readdr(6);
+            break;
+        case 7:
+            GpRegister = __readdr(7);
+            break;
+        default:
+            break;
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+ * @brief Set or unset the Mov to Debug Registers Exiting
+ * 
+ * @param Set Set or unset the Mov to Debug Registers Exiting
+ * @return VOID 
+ */
+VOID
+HvSetMovDebugRegsExiting(BOOLEAN Set)
+{
+    ULONG CpuBasedVmExecControls = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(CPU_BASED_VM_EXEC_CONTROL, &CpuBasedVmExecControls);
+
+    if (Set)
+    {
+        CpuBasedVmExecControls |= CPU_BASED_MOV_DR_EXITING;
+    }
+    else
+    {
+        CpuBasedVmExecControls &= ~CPU_BASED_MOV_DR_EXITING;
+    }
+
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(CPU_BASED_VM_EXEC_CONTROL, CpuBasedVmExecControls);
+}
+
+/**
+ * @brief Set the External Interrupt Exiting
+ * 
+ * @param Set Set or unset the External Interrupt Exiting
+ * @return VOID 
+ */
+VOID
+HvSetExternalInterruptExiting(BOOLEAN Set)
+{
+    ULONG PinBasedControls = 0;
+    ULONG VmExitControls   = 0;
+
+    //
+    // In order to enable External Interrupt Exiting we have to set
+    // PIN_BASED_VM_EXECUTION_CONTROLS_EXTERNAL_INTERRUPT in vmx
+    // pin-based controls (PIN_BASED_VM_EXEC_CONTROL) and also
+    // we should enable VM_EXIT_ACK_INTR_ON_EXIT on vmx vm-exit
+    // controls (VM_EXIT_CONTROLS), also this function might not
+    // always be successful if the guest is not in the interruptible
+    // state so it wait for and interrupt-window exiting to re-inject
+    // the interrupt into the guest
+    //
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(PIN_BASED_VM_EXEC_CONTROL, &PinBasedControls);
+    __vmx_vmread(VM_EXIT_CONTROLS, &VmExitControls);
+
+    if (Set)
+    {
+        PinBasedControls |= PIN_BASED_VM_EXECUTION_CONTROLS_EXTERNAL_INTERRUPT;
+        VmExitControls |= VM_EXIT_ACK_INTR_ON_EXIT;
+    }
+    else
+    {
+        PinBasedControls &= ~PIN_BASED_VM_EXECUTION_CONTROLS_EXTERNAL_INTERRUPT;
+        VmExitControls &= ~VM_EXIT_ACK_INTR_ON_EXIT;
+    }
+
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(PIN_BASED_VM_EXEC_CONTROL, PinBasedControls);
+    __vmx_vmwrite(VM_EXIT_CONTROLS, VmExitControls);
+}
+
+/**
+ * @brief Set the NMI Exiting
+ * 
+ * @param Set Set or unset the NMI Exiting
+ * @return VOID 
+ */
+VOID
+HvSetNmiExiting(BOOLEAN Set)
+{
+    ULONG PinBasedControls = 0;
+    ULONG VmExitControls   = 0;
+
+    //
+    // Read the previous flags
+    //
+    __vmx_vmread(PIN_BASED_VM_EXEC_CONTROL, &PinBasedControls);
+    __vmx_vmread(VM_EXIT_CONTROLS, &VmExitControls);
+
+    if (Set)
+    {
+        PinBasedControls |= PIN_BASED_VM_EXECUTION_CONTROLS_NMI_EXITING;
+        VmExitControls |= VM_EXIT_ACK_INTR_ON_EXIT;
+    }
+    else
+    {
+        PinBasedControls &= ~PIN_BASED_VM_EXECUTION_CONTROLS_NMI_EXITING;
+        VmExitControls &= ~VM_EXIT_ACK_INTR_ON_EXIT;
+    }
+
+    //
+    // Set the new value
+    //
+    __vmx_vmwrite(PIN_BASED_VM_EXEC_CONTROL, PinBasedControls);
+    __vmx_vmwrite(VM_EXIT_CONTROLS, VmExitControls);
+}
+
+/**
+ * @brief Set bits in I/O Bitmap
+ * 
+ * @param Port Port
+ * @param ProcessorID Processor ID
+ * @return BOOLEAN Returns true if the MSR Bitmap is succcessfully applied or false if not applied
+ */
+BOOLEAN
+HvSetIoBitmap(UINT64 Port, UINT32 ProcessorID)
+{
+    if (Port <= 0x7FFF)
+    {
+        SetBit(Port, g_GuestState[ProcessorID].IoBitmapVirtualAddressA);
+    }
+    else if ((0x8000 <= Port) && (Port <= 0xFFFF))
+    {
+        SetBit(Port - 0x8000, g_GuestState[ProcessorID].IoBitmapVirtualAddressB);
+    }
+    else
+    {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/**
+ * @brief Change I/O Bitmap 
+ * @details should be called in vmx-root mode
+ * @param IoPort Port 
+ * @return VOID 
+ */
+VOID
+HvPerformIoBitmapChange(UINT64 Port)
+{
+    UINT32 CoreIndex = KeGetCurrentProcessorNumber();
+
+    if (Port == DEBUGGER_EVENT_ALL_IO_PORTS)
+    {
+        //
+        // Means all the bitmaps should be put to 1
+        //
+        memset(g_GuestState[CoreIndex].IoBitmapVirtualAddressA, 0xFF, PAGE_SIZE);
+        memset(g_GuestState[CoreIndex].IoBitmapVirtualAddressB, 0xFF, PAGE_SIZE);
+    }
+    else
+    {
+        //
+        // Means only one i/o bitmap is target
+        //
+        HvSetIoBitmap(Port, CoreIndex);
+    }
+}
+
+/**
+ * @brief Reset I/O Bitmap 
+ * @details should be called in vmx-root mode
+ * @return VOID 
+ */
+VOID
+HvPerformIoBitmapReset()
+{
+    UINT32 CoreIndex = KeGetCurrentProcessorNumber();
+
+    //
+    // Means all the bitmaps should be put to 0
+    //
+    memset(g_GuestState[CoreIndex].IoBitmapVirtualAddressA, 0x0, PAGE_SIZE);
+    memset(g_GuestState[CoreIndex].IoBitmapVirtualAddressB, 0x0, PAGE_SIZE);
+}
+
+/**
+ * @brief routines to enable vm-exit for breakpoints (exception bitmap) 
+ *
+ * @return VOID 
+ */
+VOID
+HvEnableBreakpointExitingOnExceptionBitmapAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcEnableBreakpointOnExceptionBitmapOnAllCores, NULL);
+}
+
+/**
+ * @brief routines to disable vm-exit for breakpoints (exception bitmap) 
+*
+* @return VOID 
+ */
+VOID
+HvDisableBreakpointExitingOnExceptionBitmapAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcDisableBreakpointOnExceptionBitmapOnAllCores, NULL);
+}
+
+/**
+ * @brief routines to set vm-exit on all NMIs on all cores 
+ *
+ * @return VOID 
+ */
+VOID
+HvEnableNmiExitingAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcEnableNmiVmexitOnAllCores, NULL);
+}
+
+/**
+ * @brief routines to set vm-exit on all NMIs on all cores 
+ *
+ * @return VOID 
+ */
+VOID
+HvDisableNmiExitingAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcDisableNmiVmexitOnAllCores, NULL);
+}
+
+/**
+ * @brief routines to set vm-exit on all #DBs and #BP on all cores 
+*
+* @return VOID 
+ */
+VOID
+HvEnableDbAndBpExitingAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcEnableDbAndBpExitingOnAllCores, NULL);
+}
+
+/**
+ * @brief routines to unset vm-exit on all #DBs and #BP on all cores 
+ *
+ * @return VOID 
+ */
+VOID
+HvDisableDbAndBpExitingAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcDisableDbAndBpExitingOnAllCores, NULL);
 }
