@@ -23,8 +23,7 @@
  * @copyright This project is released under the GNU Public License v3.
  * 
  */
-
-#include <ntddk.h>
+#include "pch.h"
 
 /**
  * @brief The maximum wait before PAUSE
@@ -38,7 +37,7 @@ static unsigned MaxWait = 65536;
  * @param LONG Lock variable
  * @return BOOLEAN If it was successfull on getting the lock
  */
-inline BOOLEAN
+BOOLEAN
 SpinlockTryLock(volatile LONG * Lock)
 {
     return (!(*Lock) && !_interlockedbittestandset(Lock, 0));
@@ -69,6 +68,40 @@ SpinlockLock(volatile LONG * Lock)
         if (wait * 2 > MaxWait)
         {
             wait = MaxWait;
+        }
+        else
+        {
+            wait = wait * 2;
+        }
+    }
+}
+
+/**
+ * @brief Tries to get the lock and won't return until successfully get the lock
+ * 
+ * @param LONG Lock variable
+ * @param LONG MaxWait Maximum wait (pause) count
+ */
+void
+SpinlockLockWithCustomWait(volatile LONG * Lock, unsigned MaximumWait)
+{
+    unsigned wait = 1;
+
+    while (!SpinlockTryLock(Lock))
+    {
+        for (unsigned i = 0; i < wait; ++i)
+        {
+            _mm_pause();
+        }
+
+        //
+        // Don't call "pause" too many times. If the wait becomes too big,
+        // clamp it to the MaxWait.
+        //
+
+        if (wait * 2 > MaximumWait)
+        {
+            wait = MaximumWait;
         }
         else
         {

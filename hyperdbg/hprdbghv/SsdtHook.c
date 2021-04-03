@@ -9,11 +9,7 @@
  * @copyright This project is released under the GNU Public License v3.
  * 
  */
-#include <ntddk.h>
-#include <Windef.h>
-#include "Hooks.h"
-#include "Common.h"
-#include "Logging.h"
+#include "pch.h"
 
 /**
  * @brief Get the kernel base and Image size
@@ -291,7 +287,7 @@ SyscallHookTest()
         return FALSE;
     }
 
-    if (EptPageHook(ApiLocationFromSSDTOfNtCreateFile, NtCreateFileHook, (PVOID *)&NtCreateFileOrig, FALSE, FALSE, TRUE))
+    if (EptHook2(ApiLocationFromSSDTOfNtCreateFile, NtCreateFileHook, PsGetCurrentProcessId(), (PVOID *)&NtCreateFileOrig, FALSE, FALSE, TRUE))
     {
         LogInfo("Hook appkied to address of API Number : 0x%x at %llx\n", ApiNumberOfNtCreateFile, ApiLocationFromSSDTOfNtCreateFile);
     }

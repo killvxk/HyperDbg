@@ -4,7 +4,7 @@ echo.
 
 del    *.VC.db  /s
 del    *.bsc    /s
-del    *.pdb    /s   
+:: del    *.pdb    /s   
 del    *.iobj   /s
 del    *.ipdb   /s
 del    *.ilk    /s
@@ -12,6 +12,7 @@ del    *.ipch   /s
 del    *.obj    /s
 del    *.sbr    /s
 del    *.tlog   /s
+del    *.pch    /s
 
 echo Removing build folders ...
 echo.

@@ -9,15 +9,62 @@
  * @copyright This project is released under the GNU Public License v3.
  * 
  */
-
-#include <ntddk.h>
+#pragma once
 
 //////////////////////////////////////////////////
 //				     Functions		      		//
 //////////////////////////////////////////////////
 
-VOID
-ExtensionCommandEnableEferOnAllProcessors();
+BOOLEAN
+ExtensionCommandPte(PDEBUGGER_READ_PAGE_TABLE_ENTRIES_DETAILS PteDetails);
 
 VOID
-ExtensionCommandDisableEferOnAllProcessors();
+ExtensionCommandVa2paAndPa2va(PDEBUGGER_VA2PA_AND_PA2VA_COMMANDS AddressDetails);
+
+VOID
+ExtensionCommandChangeAllMsrBitmapReadAllCores(UINT64 BitmapMask);
+
+VOID
+ExtensionCommandResetChangeAllMsrBitmapReadAllCores();
+
+VOID
+ExtensionCommandChangeAllMsrBitmapWriteAllCores(UINT64 BitmapMask);
+
+VOID
+ExtensionCommandResetAllMsrBitmapWriteAllCores();
+
+VOID
+ExtensionCommandEnableRdtscExitingAllCores();
+
+VOID
+ExtensionCommandDisableRdtscExitingAllCores();
+
+VOID
+ExtensionCommandEnableRdpmcExitingAllCores();
+
+VOID
+ExtensionCommandDisableRdpmcExitingAllCores();
+
+VOID
+ExtensionCommandSetExceptionBitmapAllCores(UINT64 ExceptionIndex);
+
+VOID
+ExtensionCommandResetExceptionBitmapAllCores();
+
+VOID
+ExtensionCommandEnableMovDebugRegistersExitingAllCores();
+
+VOID
+ExtensionCommandDisableMovDebugRegistersExitingAllCores();
+
+VOID
+ExtensionCommandSetExternalInterruptExitingAllCores();
+
+VOID
+ExtensionCommandUnsetExternalInterruptExitingAllCores();
+
+VOID
+ExtensionCommandIoBitmapChangeAllCores(UINT64 Port);
+
+VOID
+ExtensionCommandIoBitmapResetAllCores();

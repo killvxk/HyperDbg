@@ -10,7 +10,6 @@
  * 
  */
 #pragma once
-#include <ntddk.h>
 
 //////////////////////////////////////////////////
 //					Definitions					//
@@ -60,7 +59,17 @@ typedef enum _EXCEPTION_VECTORS
     EXCEPTION_VECTOR_RESERVED9,
     EXCEPTION_VECTOR_RESERVED10,
     EXCEPTION_VECTOR_RESERVED11,
-    EXCEPTION_VECTOR_RESERVED12
+    EXCEPTION_VECTOR_RESERVED12,
+
+    //
+    // NT (Windows) specific exception vectors.
+    //
+    APC_INTERRUPT   = 31,
+    DPC_INTERRUPT   = 47,
+    CLOCK_INTERRUPT = 209,
+    IPI_INTERRUPT   = 225,
+    PMI_INTERRUPT   = 254,
+
 } EXCEPTION_VECTORS;
 
 /**
@@ -83,6 +92,10 @@ typedef enum _INTERRUPT_TYPE
 //					Structures					//
 //////////////////////////////////////////////////
 
+/**
+ * @brief Interrupt injection and event format
+ * 
+ */
 typedef union _INTERRUPT_INFO
 {
     struct
@@ -98,20 +111,10 @@ typedef union _INTERRUPT_INFO
     UINT32 Flags;
 } INTERRUPT_INFO, *PINTERRUPT_INFO;
 
-typedef union _VMEXIT_INTERRUPT_INFO
-{
-    struct
-    {
-        UINT32 Vector : 8;
-        UINT32 InterruptionType : 3;
-        UINT32 ErrorCodeValid : 1;
-        UINT32 NmiUnblocking : 1;
-        UINT32 Reserved : 18;
-        UINT32 Valid : 1;
-    };
-    UINT32 Flags;
-} VMEXIT_INTERRUPT_INFO, *PVMEXIT_INTERRUPT_INFO;
-
+/**
+ * @brief Event information
+ * 
+ */
 typedef struct _EVENT_INFORMATION
 {
     INTERRUPT_INFO InterruptInfo;
@@ -125,11 +128,18 @@ typedef struct _EVENT_INFORMATION
 
 VOID
 EventInjectBreakpoint();
+
 VOID
 EventInjectInterruption(INTERRUPT_TYPE InterruptionType, EXCEPTION_VECTORS Vector, BOOLEAN DeliverErrorCode, ULONG32 ErrorCode);
+
 VOID
 EventInjectGeneralProtection();
+
 VOID
-EventInjectUndefinedOpcode();
+EventInjectUndefinedOpcode(UINT32 CurrentProcessorIndex);
+
 VOID
-EventInjectPageFault(ULONG32 ErrorCode);
+EventInjectPageFault(UINT64 PageFaultAddress);
+
+VOID
+EventInjectDebugBreakpoint();

@@ -5,24 +5,22 @@
  * @details
  * @version 0.1
  * @date 2020-04-11
- * 
+ *
  * @copyright This project is released under the GNU Public License v3.
- * 
+ *
  */
 #include "pch.h"
 
 /**
  * @brief Dll Main Entry
- * 
- * @param hModule 
- * @param ul_reason_for_call 
- * @param lpReserved 
- * @return BOOL DllMain 
+ *
+ * @param hModule
+ * @param ul_reason_for_call
+ * @param lpReserved
+ * @return BOOL DllMain
  */
-BOOL APIENTRY DllMain( HMODULE hModule,
-                       DWORD  ul_reason_for_call,
-                       LPVOID lpReserved
-                     )
+BOOL APIENTRY
+DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     switch (ul_reason_for_call)
     {
@@ -34,4 +32,3 @@ BOOL APIENTRY DllMain( HMODULE hModule,
     }
     return TRUE;
 }
-
